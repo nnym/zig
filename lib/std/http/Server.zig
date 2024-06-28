@@ -634,22 +634,21 @@ pub const Request = struct {
             return 0;
         }
         assert(s.state == .receiving_body);
-        const available = try fill(s, request.head_end);
-        const len = @min(remaining_content_length.*, available.len, buffer.len);
-        @memcpy(buffer[0..len], available[0..len]);
+        const available = try fill(s, request.head_end, buffer);
+        const len = @min(remaining_content_length.*, available, buffer.len);
         remaining_content_length.* -= len;
-        s.next_request_start += len;
+        // s.next_request_start += len;
         if (remaining_content_length.* == 0)
             s.state = .ready;
         return len;
     }
 
-    fn fill(s: *Server, head_end: usize) ReadError![]u8 {
-        const available = s.read_buffer[s.next_request_start..s.read_buffer_len];
-        if (available.len > 0) return available;
+    fn fill(s: *Server, head_end: usize, buffer: []u8) ReadError!usize {
+        // const available = s.read_buffer[s.next_request_start..s.read_buffer_len];
+        // if (available.len > 0) return available;
         s.next_request_start = head_end;
-        s.read_buffer_len = head_end + try s.connection.stream.read(s.read_buffer[head_end..]);
-        return s.read_buffer[head_end..s.read_buffer_len];
+        s.read_buffer_len = head_end;
+        return s.connection.stream.read(buffer);
     }
 
     fn read_chunked(context: *const anyopaque, buffer: []u8) ReadError!usize {
@@ -666,20 +665,19 @@ pub const Request = struct {
                 .invalid => return 0,
                 .data => {
                     assert(s.state == .receiving_body);
-                    const available = try fill(s, head_end);
-                    const len = @min(cp.chunk_len, available.len, buffer.len);
-                    @memcpy(buffer[0..len], available[0..len]);
+                    const available = try fill(s, head_end, buffer);
+                    const len = @min(cp.chunk_len, available, buffer.len);
                     cp.chunk_len -= len;
                     if (cp.chunk_len == 0)
                         cp.state = .data_suffix;
                     out_end += len;
-                    s.next_request_start += len;
+                    // s.next_request_start += len;
                     continue;
                 },
                 else => {
                     assert(s.state == .receiving_body);
-                    const available = try fill(s, head_end);
-                    const n = cp.feed(available);
+                    const available = try fill(s, head_end, buffer);
+                    const n = cp.feed(buffer);
                     switch (cp.state) {
                         .invalid => return error.HttpChunkInvalid,
                         .data => {
@@ -722,14 +720,12 @@ pub const Request = struct {
                                     }
                                 }
                             }
-                            const data = available[n..];
-                            const len = @min(cp.chunk_len, data.len, buffer.len);
-                            @memcpy(buffer[0..len], data[0..len]);
+                            const len = @min(cp.chunk_len, available - n, buffer.len);
                             cp.chunk_len -= len;
                             if (cp.chunk_len == 0)
                                 cp.state = .data_suffix;
                             out_end += len;
-                            s.next_request_start += n + len;
+                            s.next_request_start += n;// + len;
                             continue;
                         },
                         else => continue,
